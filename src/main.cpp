@@ -37,6 +37,8 @@ float read_float(Adafruit_MCP2515 *hcan);
 
 Adafruit_MCP2515 can(PIN_CAN_CS);
 
+int *getLoadData();
+
 void setup()
 {
   Serial.begin(UART_BAUD);
@@ -154,8 +156,19 @@ void loop()
     }
   }
 
+  digitalWrite(9, HIGH);
+  digitalWrite(6, HIGH);
+  delay(1000);
+  digitalWrite(9, LOW);
+  digitalWrite(6, LOW);
+  delay(1000);
+}
+
+int *getLoadData()
+{
+  static int array[4];
+
   static boolean newDataReady = 0;
-  const int serialPrintInterval = 0; // increase value to slow down serial print activity
 
   // check for new data/start next conversion:
   if (LoadCell_1.update())
@@ -167,67 +180,18 @@ void loop()
   // get smoothed value from data set
   if ((newDataReady))
   {
-    if (millis() > t + serialPrintInterval)
+    if (millis() > t)
     {
-      float a = LoadCell_1.getData();
-      float b = LoadCell_2.getData();
-      float c = LoadCell_3.getData();
-      float d = LoadCell_4.getData();
+      array[0] = LoadCell_1.getData();
+      array[1] = LoadCell_2.getData();
+      array[2] = LoadCell_3.getData();
+      array[3] = LoadCell_4.getData();
       newDataReady = 0;
       t = millis();
     }
   }
-
-  Serial.println("Sending Load Cell 1 command"); // im gonna comment on each of these lines for my reasoning
-  can.beginPacket(0x444);                        // is this relevant?
-  can.write(0x10);                               // packet type i think
-  can.write(0x04);                               // telemetry type?
-  can.write(0x01);                               // P&ID controller label?
-  can.write(a);
-  if (!can.endPacket())
-  {
-    Serial.println("Error sending packet");
-  }
-
-  Serial.println("Sending Load Cell 2 command");
-  can.beginPacket(0x444);
-  can.write(0x10);
-  can.write(0x04);
-  can.write(0x02);
-  can.write(b);
-  if (!can.endPacket())
-  {
-    Serial.println("Error sending packet");
-  }
-
-  Serial.println("Sending Load Cell 3 command");
-  can.beginPacket(0x444);
-  can.write(0x10);
-  can.write(0x04);
-  can.write(0x03);
-  can.write(c);
-  if (!can.endPacket())
-  {
-    Serial.println("Error sending packet");
-  }
-
-  Serial.println("Sending Load Cell 4 command");
-  can.beginPacket(0x444);
-  can.write(0x10);
-  can.write(0x04);
-  can.write(0x04);
-  can.write(d);
-  if (!can.endPacket())
-  {
-    Serial.println("Error sending packet");
-  }
-
-  digitalWrite(9, HIGH);
-  digitalWrite(6, HIGH);
-  delay(1000);
-  digitalWrite(9, LOW);
-  digitalWrite(6, LOW);
-  delay(1000);
+  // Return the pointer to the allocated array
+  return array;
 }
 
 void on_receive(int packet_size)
