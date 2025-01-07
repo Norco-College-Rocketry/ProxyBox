@@ -181,7 +181,7 @@ void loop()
   Serial.println("Sending Load Cell 1 command"); // im gonna comment on each of these lines for my reasoning
   can.beginPacket(0x444);                        // is this relevant?
   can.write(0x10);                               // packet type i think
-  can.write(0x01);                               // telemetry type?
+  can.write(0x04);                               // telemetry type?
   can.write(0x01);                               // P&ID controller label?
   can.write(a);
   if (!can.endPacket())
@@ -189,10 +189,10 @@ void loop()
     Serial.println("Error sending packet");
   }
 
-  Serial.println("Sending LED command");
+  Serial.println("Sending Load Cell 2 command");
   can.beginPacket(0x444);
   can.write(0x10);
-  can.write(0x01);
+  can.write(0x04);
   can.write(0x02);
   can.write(b);
   if (!can.endPacket())
@@ -200,10 +200,10 @@ void loop()
     Serial.println("Error sending packet");
   }
 
-  Serial.println("Sending LED command");
+  Serial.println("Sending Load Cell 3 command");
   can.beginPacket(0x444);
   can.write(0x10);
-  can.write(0x01);
+  can.write(0x04);
   can.write(0x03);
   can.write(c);
   if (!can.endPacket())
@@ -211,10 +211,10 @@ void loop()
     Serial.println("Error sending packet");
   }
 
-  Serial.println("Sending LED command");
+  Serial.println("Sending Load Cell 4 command");
   can.beginPacket(0x444);
   can.write(0x10);
-  can.write(0x01);
+  can.write(0x04);
   can.write(0x04);
   can.write(d);
   if (!can.endPacket())
