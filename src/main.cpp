@@ -10,14 +10,9 @@
 #define PIN_RELAY_1 11
 #define PIN_RELAY_2 12
 
-typedef enum {
-  TELEMETRY_PACKET = 0x10
-} PACKET_TYPE;
-
-typedef enum {
-  VOLTAGE_TELEMETRY = 0x01,
-  PRESSURE_TELEMETRY = 0x02
-} TELEMETRY_TYPE;
+const uint8_t mac[] = { 0x0E, 0x6C, 0xEB, 0x5B, 0xF2, 0xAB };
+const IPAddress ip = { 10, 63, 185, 2 };
+const IPAddress broker = { 10, 63, 185, 1 };
 
 void on_debug_serial();
 void on_mqtt_receive(char* topic, byte* payload, unsigned int length);
@@ -40,25 +35,18 @@ void setup() {
   digitalWrite(LED_BUILTIN, LOW);
 
   Serial.begin(UART_BAUD);
-  // while (!Serial) delay(10);
 
   if (!can.begin(CAN_BAUD)) {
-   
     Serial.println("Error initializing MCP2515.");
-    // while(1) delay(10);
+    on_error();
   }
   Serial.println("MCP2515 found."); 
   
-  byte mac[] = { 0x0E, 0x6C, 0xEB, 0x5B, 0xF2, 0xAB };
-  byte ip[] = { 10, 154, 111, 2 };
-  byte dns[] = { 10, 154, 111, 1 };
-  byte gateway[] = { 10, 154, 111, 1 };
   Ethernet.init(13);
-  Ethernet.begin(mac, ip, dns, gateway);
+  Ethernet.begin((uint8_t*)mac, ip); // the MAC isn't const qualified, but is only used to pass as a const reference to the driver
 
   delay(1500);
-  byte server[] = { 10, 154, 111, 1 };
-  pubSubClient.setServer(gateway, 1883);
+  pubSubClient.setServer(broker, 1883);
   pubSubClient.setCallback(on_mqtt_receive);
 
   can.onReceive(PIN_CAN_INTERRUPT, on_canbus_receive);
@@ -70,15 +58,6 @@ void loop() {
   }
 
   if (!pubSubClient.connected()) { reconnect(); }
-
-  // digitalWrite(PIN_RELAY_1, HIGH);
-  // digitalWrite(PIN_RELAY_2, HIGH);
-  // digitalWrite(LED_BUILTIN, HIGH);
-  // delay(1000);
-  // digitalWrite(PIN_RELAY_1, LOW);
-  // digitalWrite(PIN_RELAY_2, LOW);
-  // digitalWrite(LED_BUILTIN, LOW);
-  // delay(1000);
 
   pubSubClient.loop();
 }
@@ -154,6 +133,12 @@ void on_mqtt_receive(char* topic, byte* payload, unsigned int length) {
     if (command == "ABORT") {
       Serial.println("Aborting.");
        digitalWrite(PIN_RELAY_1, LOW);
+       // TODO abort sequence
+       // Open dump
+       // Open vent
+       // Close fill
+       // Close main ox
+       // Close fuel
     }
     if (command == "IGNITE") {
        Serial.println("Ignition.");
@@ -166,9 +151,12 @@ void on_mqtt_receive(char* topic, byte* payload, unsigned int length) {
       Serial.print("ing valve ");
       Serial.print(valve);
       Serial.println(".");
+
+      // TODO send servo CAN command
     }
     if (command == "SELFTEST") { 
-      Serial.println("Running self-test."); 
+      Serial.println("Running self-test.");
+      // TODO execute self-test sequence
     }
   }
 }
