@@ -61,6 +61,12 @@ void setup() {
   Ethernet.init(13);
   Ethernet.begin((uint8_t*)mac, ip); // the MAC isn't const qualified, but is only used to pass as a const reference to the driver
 
+  delay(1500);
+  pubSubClient.setServer(broker, 1883);
+  pubSubClient.setCallback(on_mqtt_receive);
+
+  can.onReceive(PIN_CAN_INTERRUPT, on_canbus_receive);
+
   float calibrationValue_1; // calibration value load cell 1
   float calibrationValue_2; // calibration value load cell 2
   float calibrationValue_3; // calibration value load cell 3
@@ -114,12 +120,6 @@ void setup() {
   LoadCell_3.setCalFactor(calibrationValue_3); // user set calibration value (float)
   LoadCell_4.setCalFactor(calibrationValue_4); // user set calibration value (float)
   Serial.println("Startup is complete");
-
-  delay(1500);
-  pubSubClient.setServer(broker, 1883);
-  pubSubClient.setCallback(on_mqtt_receive);
-
-  can.onReceive(PIN_CAN_INTERRUPT, on_canbus_receive);
 }
 
 void loop() {
