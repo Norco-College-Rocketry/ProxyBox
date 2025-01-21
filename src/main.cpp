@@ -16,11 +16,11 @@ const IPAddress ip = { 10, 63, 185, 2 };
 const IPAddress broker = { 10, 63, 185, 1 };
 
 // pins:
-const int HX711_sck = 6;     // mcu > HX711 sck pin
+const int HX711_sck = SCL;     // mcu > HX711 sck pin
 const int HX711_dout_1 = 5;  // mcu > HX711 no 1 dout pin
-const int HX711_dout_2 = 7;  // mcu > HX711 no 2 dout pin
+const int HX711_dout_2 = 6;  // mcu > HX711 no 2 dout pin
 const int HX711_dout_3 = 9;  // mcu > HX711 no 3 dout pin
-const int HX711_dout_4 = 11; // mcu > HX711 no 4 dout pin
+const int HX711_dout_4 = 10; // mcu > HX711 no 4 dout pin
 
 unsigned long t = 0;
 
