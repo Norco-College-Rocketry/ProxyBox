@@ -35,7 +35,7 @@ void on_mqtt_receive(char* topic, byte* payload, unsigned int length);
 void on_canbus_receive(int packet_size);
 float read_float(Adafruit_MCP2515 *hcan);
 void reconnect();
-int *getLoadData();
+float* getLoadData();
 void on_error();
 
 Adafruit_MCP2515 can(PIN_CAN_CS);
@@ -130,6 +130,8 @@ void loop() {
   if (!pubSubClient.connected()) { reconnect(); }
 
   pubSubClient.loop();
+
+  float* load_data = getLoadData();
 }
 
 void on_debug_serial() {
@@ -164,8 +166,8 @@ void on_debug_serial() {
     }
 }
 
-int *getLoadData() {
-  static int array[4];
+float* getLoadData() {
+  static float array[4];
 
   static boolean newDataReady = 0;
 
