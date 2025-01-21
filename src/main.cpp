@@ -189,8 +189,28 @@ float* getLoadData() {
       array[3] = LoadCell_4.getData();
       newDataReady = 0;
       t = millis();
+
+      for (int i=0; i<4; i++) {
+        JsonDocument json;
+        char label[] = {'L', 'C', '0', '0'+(char)i, '\0'}, topic[24];
+        sprintf(topic, "telemetry/tank/weight/%d", i+1);
+        json["label"] = label;
+        json["value"] = array[i];
+        json["units"] = "kg";
+        String str;
+        serializeJson(json, str);
+        pubSubClient.publish(topic, str.c_str());
+      }
+  
+      Serial.print("{ ");
+      for (size_t i=0; i<4; i++) {
+        Serial.print(array[i]);
+        if (i != 3) Serial.print(", ");
+      }
+      Serial.println(" }");
     }
   }
+
   // Return the pointer to the allocated array
   return array;
 }
