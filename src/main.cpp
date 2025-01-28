@@ -31,7 +31,7 @@ void setup() {
   pinMode(PIN_RELAY_2, OUTPUT);
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(PIN_RELAY_1, LOW);
-  digitalWrite(PIN_RELAY_1, LOW);
+  digitalWrite(PIN_RELAY_2, LOW);
   digitalWrite(LED_BUILTIN, LOW);
 
   Serial.begin(UART_BAUD);
