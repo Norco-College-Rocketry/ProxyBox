@@ -64,7 +64,7 @@ void loop() {
 
 void on_debug_serial() {
     uint8_t command = Serial.parseInt();
-    uint8_t target_controller = 2;
+    uint8_t target_controller = 1;
     switch (command) {
       case 0: { 
         Serial.println("Sending LED command");
@@ -73,6 +73,22 @@ void on_debug_serial() {
         can.write(0x01);
         can.write(target_controller);
         can.write(2);
+        if (!can.endPacket()) {
+          Serial.println("Error sending packet");
+        }
+       } break;
+
+       case 1:
+       case 2:
+       case 3:
+       case 4:
+       case 5: {
+        Serial.println("Sending calibration command");
+        can.beginPacket(444);
+        can.write(0x20);
+        can.write(0x03);
+        can.write(0x01);
+        can.write(command);
         if (!can.endPacket()) {
           Serial.println("Error sending packet");
         }
