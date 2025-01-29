@@ -57,9 +57,9 @@ void loop() {
     on_debug_serial();
   }
 
-  if (!pubSubClient.connected()) { reconnect(); }
+  // if (!pubSubClient.connected()) { reconnect(); }
 
-  pubSubClient.loop();
+  // pubSubClient.loop();
 }
 
 void on_debug_serial() {
@@ -80,7 +80,9 @@ void on_debug_serial() {
 
        case 6: 
        case 7: 
-       case 8: { 
+       case 8: 
+       case 9: 
+       case 10: { 
         Serial.println("Sending mode command");
         can.beginPacket(444);
         can.write(0x20);
@@ -104,9 +106,12 @@ void on_canbus_receive(int packet_size) {
       uint8_t transmitter = can.read();
       TELEMETRY_TYPE telemetry_type = (TELEMETRY_TYPE)can.read();
 
+      const char* topic;
+
       switch (telemetry_type) {
         case (VOLTAGE_TELEMETRY):
         case (PRESSURE_TELEMETRY):
+        case (TEMPERATURE_TELEMETRY):
         {
           Serial.printf("%u, %f\n", controller, read_float(&can));
         } break;
