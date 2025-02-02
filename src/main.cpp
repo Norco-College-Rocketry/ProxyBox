@@ -7,28 +7,18 @@
 #include <HX711_ADC.h>
 
 #include "ncr_common.h"
+#include "LoadCell.h"
 
-#define PIN_RELAY_1 11
-#define PIN_RELAY_2 12
+#define PIN_RELAY_1 11u
+#define PIN_RELAY_2 12u
+
+#define NUM_LOAD_CELLS 4u
+#define LOAD_CELL_SAMPLE_RATE 100u // Period between load cell data samples in milliseconds
+#define LOAD_CELL_DEFAULT_CALIBRATION_VALUE -43.42
 
 const uint8_t mac[] = { 0x0E, 0x6C, 0xEB, 0x5B, 0xF2, 0xAB };
 const IPAddress ip = { 10, 63, 185, 2 };
 const IPAddress broker = { 10, 63, 185, 1 };
-
-// pins:
-const int HX711_sck = SCL;     // mcu > HX711 sck pin
-const int HX711_dout_1 = 5;  // mcu > HX711 no 1 dout pin
-const int HX711_dout_2 = 6;  // mcu > HX711 no 2 dout pin
-const int HX711_dout_3 = 9;  // mcu > HX711 no 3 dout pin
-const int HX711_dout_4 = 10; // mcu > HX711 no 4 dout pin
-
-unsigned long t = 0;
-
-// HX711 constructor (dout pin, sck pin)
-HX711_ADC LoadCell_1(HX711_dout_1, HX711_sck); // HX711 1
-HX711_ADC LoadCell_2(HX711_dout_2, HX711_sck); // HX711 2
-HX711_ADC LoadCell_3(HX711_dout_3, HX711_sck); // HX711 1
-HX711_ADC LoadCell_4(HX711_dout_4, HX711_sck); // HX711 2
 
 void on_debug_serial();
 void on_mqtt_receive(char* topic, byte* payload, unsigned int length);
@@ -37,10 +27,18 @@ float read_float(Adafruit_MCP2515 *hcan);
 void reconnect();
 float* getLoadData();
 void on_error();
+void sample_load_cells();
 
 Adafruit_MCP2515 can(PIN_CAN_CS);
 EthernetClient ethernetClient;
 PubSubClient pubSubClient(ethernetClient);
+LoadCell load_cells[NUM_LOAD_CELLS] = {
+  {"LC01", 5, SCL, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
+  {"LC02", 6, SCL, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
+  {"LC03", 9, SCL, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
+  {"LC04", 10, SCL, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
+};
+long next_load_cell_sample_time = 0;
 
 void setup() {
   pinMode(PIN_RELAY_1, OUTPUT);
@@ -59,66 +57,35 @@ void setup() {
   Serial.println("MCP2515 found."); 
   
   Ethernet.init(13);
-  Ethernet.begin((uint8_t*)mac, ip); // the MAC isn't const qualified, but is only used to pass as a const reference to the driver
+  Ethernet.begin((uint8_t*)mac, ip); // the MAC isn't const qualified in this function, but is only used to pass as a const reference to the driver
 
-  delay(1500);
+  delay(1500); // TODO test if this is necessary
   pubSubClient.setServer(broker, 1883);
   pubSubClient.setCallback(on_mqtt_receive);
 
   can.onReceive(PIN_CAN_INTERRUPT, on_canbus_receive);
 
-  float calibrationValue_1; // calibration value load cell 1
-  float calibrationValue_2; // calibration value load cell 2
-  float calibrationValue_3; // calibration value load cell 3
-  float calibrationValue_4; // calibration value load cell 4
+  unsigned long stabilizing_time = 5000; // tare preciscion can be improved by adding a few seconds of stabilizing time
+  boolean tare = true;                 // set this to false if you don't want tare to be performed in the next step
 
-  calibrationValue_1 = -43.42; // uncomment this if you want to set this value in the sketch
-  calibrationValue_2 = -43.42; // uncomment this if you want to set this value in the sketch
-  calibrationValue_3 = -43.42; // uncomment this if you want to set this value in the sketch
-  calibrationValue_4 = -43.42; // uncomment this if you want to set this value in the sketch
+  for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
+    load_cells[i].driver()->begin();
+  }
+  uint8_t start_status = 0;
+  while (start_status < 4) {
+    for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
+      if (load_cells[i].driver()->startMultiple(stabilizing_time, tare) != 0) { start_status++; }
+    }
+  }
+  for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
+    if (load_cells[i].driver()->getTareTimeoutFlag()) {
+      Serial.printf("Load cell %d timeout: check wiring and pin designations.\n", i+1);   
+    }
+  }
+  for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
+    load_cells[i].set_calibration_value(load_cells[i].calibration_value());
+  }
 
-  LoadCell_1.begin();
-  LoadCell_2.begin();
-  LoadCell_3.begin();
-  LoadCell_4.begin();
-
-  unsigned long stabilizingtime = 5000; // tare preciscion can be improved by adding a few seconds of stabilizing time
-  boolean _tare = true;                 // set this to false if you don't want tare to be performed in the next step
-  byte loadcell_1_rdy = 0;
-  byte loadcell_2_rdy = 0;
-  byte loadcell_3_rdy = 0;
-  byte loadcell_4_rdy = 0;
-  while ((loadcell_1_rdy + loadcell_2_rdy + loadcell_3_rdy + loadcell_4_rdy) < 4)
-  { // run startup, stabilization and tare, both modules simultaniously
-    if (!loadcell_1_rdy)
-      loadcell_1_rdy = LoadCell_1.startMultiple(stabilizingtime, _tare);
-    if (!loadcell_2_rdy)
-      loadcell_2_rdy = LoadCell_2.startMultiple(stabilizingtime, _tare);
-    if (!loadcell_3_rdy)
-      loadcell_3_rdy = LoadCell_3.startMultiple(stabilizingtime, _tare);
-    if (!loadcell_4_rdy)
-      loadcell_4_rdy = LoadCell_4.startMultiple(stabilizingtime, _tare);
-  }
-  if (LoadCell_1.getTareTimeoutFlag())
-  {
-    Serial.println("Timeout, check MCU>HX711 no.1 wiring and pin designations");
-  }
-  if (LoadCell_2.getTareTimeoutFlag())
-  {
-    Serial.println("Timeout, check MCU>HX711 no.2 wiring and pin designations");
-  }
-  if (LoadCell_3.getTareTimeoutFlag())
-  {
-    Serial.println("Timeout, check MCU>HX711 no.3 wiring and pin designations");
-  }
-  if (LoadCell_4.getTareTimeoutFlag())
-  {
-    Serial.println("Timeout, check MCU>HX711 no.4 wiring and pin designations");
-  }
-  LoadCell_1.setCalFactor(calibrationValue_1); // user set calibration value (float)
-  LoadCell_2.setCalFactor(calibrationValue_2); // user set calibration value (float)
-  LoadCell_3.setCalFactor(calibrationValue_3); // user set calibration value (float)
-  LoadCell_4.setCalFactor(calibrationValue_4); // user set calibration value (float)
   Serial.println("Startup is complete");
 }
 
@@ -127,11 +94,38 @@ void loop() {
     on_debug_serial();
   }
 
-  // if (!pubSubClient.connected()) { reconnect(); }
-
+  // Update MQTT client
+  if (!pubSubClient.connected()) { reconnect(); }
   pubSubClient.loop();
 
-  float* load_data = getLoadData();
+  // Update and sample load cells
+  if (load_cells[0].driver()->update() && millis() >= next_load_cell_sample_time) {
+    for (size_t i=1; i<NUM_LOAD_CELLS; i++) { load_cells[i].driver()->update(); }
+    sample_load_cells();
+    next_load_cell_sample_time = millis()+LOAD_CELL_SAMPLE_RATE;
+  }
+}
+
+void sample_load_cells() {
+  JsonDocument json;
+  String out;
+
+  Serial.print("{ ");
+  for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
+    char topic[24];
+    float data = load_cells[i].driver()->getData() / 1000; // Must convert from grams to kg
+
+    sprintf(topic, "telemetry/tank/weight/%d", i+1);
+    json["label"] = load_cells[i].pid_label();
+    json["value"] = data; 
+    json["units"] = "kg";
+    serializeJson(json, out);
+    pubSubClient.publish(topic, out.c_str());
+
+    Serial.print(data);
+    if (i != 3) Serial.print(", ");
+  }
+  Serial.println(" }");
 }
 
 void on_debug_serial() {
@@ -182,55 +176,6 @@ void on_debug_serial() {
         }
        } break;
     }
-}
-
-float* getLoadData() {
-  static float array[4];
-
-  static boolean newDataReady = 0;
-
-  // check for new data/start next conversion:
-  if (LoadCell_1.update())
-    newDataReady = true;
-  LoadCell_2.update();
-  LoadCell_3.update();
-  LoadCell_4.update();
-
-  // get smoothed value from data set
-  if ((newDataReady))
-  {
-    if (millis() > t)
-    {
-      array[0] = LoadCell_1.getData();
-      array[1] = LoadCell_2.getData();
-      array[2] = LoadCell_3.getData();
-      array[3] = LoadCell_4.getData();
-      newDataReady = 0;
-      t = millis();
-
-      for (int i=0; i<4; i++) {
-        JsonDocument json;
-        char label[] = {'L', 'C', '0', '0'+(char)i, '\0'}, topic[24];
-        sprintf(topic, "telemetry/tank/weight/%d", i+1);
-        json["label"] = label;
-        json["value"] = array[i];
-        json["units"] = "kg";
-        String str;
-        serializeJson(json, str);
-        pubSubClient.publish(topic, str.c_str());
-      }
-  
-      Serial.print("{ ");
-      for (size_t i=0; i<4; i++) {
-        Serial.print(array[i]);
-        if (i != 3) Serial.print(", ");
-      }
-      Serial.println(" }");
-    }
-  }
-
-  // Return the pointer to the allocated array
-  return array;
 }
 
 void on_canbus_receive(int packet_size) {
