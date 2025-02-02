@@ -254,14 +254,6 @@ void on_canbus_receive(int packet_size) {
 }
 
 void on_mqtt_receive(char* topic, byte* payload, unsigned int length) {
-  Serial.print("Message arrived [");
-  Serial.print(topic);
-  Serial.print("] ");
-  for (int i=0;i<length;i++) {
-    Serial.print((char)payload[i]);
-  }
-  Serial.println();
-
   if (strncmp(topic, "commands", 8) == 0) {
     JsonDocument json;
     deserializeJson(json, payload);
