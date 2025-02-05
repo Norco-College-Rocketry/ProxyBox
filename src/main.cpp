@@ -30,16 +30,17 @@ void reconnect();
 float* getLoadData();
 void on_error();
 void sample_load_cells();
+uint16_t pid_to_can_id(String pid_label);
 
 Adafruit_MCP2515 can(PIN_CAN_CS);
 EthernetClient ethernetClient;
 PubSubClient pubSubClient(ethernetClient);
-LoadCell load_cells[NUM_LOAD_CELLS] = {
-  {"LC01", {5,  SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
-  {"LC02", {6,  SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
-  {"LC03", {9,  SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
-  {"LC04", {10, SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
-};
+// LoadCell load_cells[NUM_LOAD_CELLS] = {
+//   {"LC01", {5,  SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
+//   {"LC02", {6,  SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
+//   {"LC03", {9,  SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
+//   {"LC04", {10, SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
+// };
 long next_load_cell_sample_time = 0;
 
 void setup() {
@@ -58,15 +59,15 @@ void setup() {
   }
   Serial.println("MCP2515 found."); 
   
-  // Ethernet.init(13);
-  // Ethernet.begin((uint8_t*)mac, ip); // the MAC isn't const qualified in this function, but is only used to pass as a const reference to the driver
+  Ethernet.init(13);
+  Ethernet.begin((uint8_t*)mac, ip); // the MAC isn't const qualified in this function, but is only used to pass as a const reference to the driver
 
-  // delay(1500); // TODO test if this is necessary
-  // pubSubClient.setServer(broker, 1883);
-  // pubSubClient.setCallback(on_mqtt_receive);
+  delay(1500); // TODO test if this is necessary
+  pubSubClient.setServer(broker, 1883);
+  pubSubClient.setCallback(on_mqtt_receive);
 
-  // unsigned long stabilizing_time = 5000; // tare preciscion can be improved by adding a few seconds of stabilizing time
-  // boolean tare = true;                 // set this to false if you don't want tare to be performed in the next step
+  unsigned long stabilizing_time = 5000; // tare preciscion can be improved by adding a few seconds of stabilizing time
+  boolean tare = true;                 // set this to false if you don't want tare to be performed in the next step
 
   // for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
   //   load_cells[i].driver.begin();
@@ -100,10 +101,10 @@ void loop() {
   }
 
   // Update MQTT client
-  // if (!pubSubClient.connected()) { reconnect(); }
-  // pubSubClient.loop();
+  if (!pubSubClient.connected()) { reconnect(); }
+  pubSubClient.loop();
 
-  // Update and sample load cells
+  // // Update and sample load cells
   // if (load_cells[0].driver.update() && millis() >= next_load_cell_sample_time) {
   //   next_load_cell_sample_time = millis()+LOAD_CELL_SAMPLE_RATE;
   //   for (size_t i=1; i<NUM_LOAD_CELLS; i++) { load_cells[i].driver.update(); }
@@ -111,27 +112,27 @@ void loop() {
   // }
 }
 
-void sample_load_cells() {
-  JsonDocument json;
-  String out;
+// void sample_load_cells() {
+//   JsonDocument json;
+//   String out;
 
-  Serial.print("{ ");
-  for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
-    char topic[24];
-    float data = load_cells[i].driver.getData() / 1000; // Must convert from grams to kg
+//   Serial.print("{ ");
+//   for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
+//     char topic[24];
+//     float data = load_cells[i].driver.getData() / 1000; // Must convert from grams to kg
 
-    sprintf(topic, "telemetry/tank/weight/%d", i+1);
-    json["label"] = load_cells[i].pid_label;
-    json["value"] = data; 
-    json["units"] = "kg";
-    serializeJson(json, out);
-    pubSubClient.publish(topic, out.c_str());
+//     sprintf(topic, "telemetry/tank/weight/%d", i+1);
+//     json["label"] = load_cells[i].pid_label;
+//     json["value"] = data; 
+//     json["units"] = "kg";
+//     serializeJson(json, out);
+//     pubSubClient.publish(topic, out.c_str());
 
-    Serial.print(data);
-    if (i != 3) Serial.print(", ");
-  }
-  Serial.println(" }");
-}
+//     Serial.print(data);
+//     if (i != 3) Serial.print(", ");
+//   }
+//   Serial.println(" }");
+// }
 
 void on_debug_serial() {
     uint8_t command = Serial.parseInt();
@@ -265,19 +266,53 @@ void on_mqtt_receive(char* topic, byte* payload, unsigned int length) {
     }
     if (command == "VALVE") {
       String valve = json["parameters"]["valve"],
-             position = json["parameters"]["position"];
-      Serial.print(position);
+             position_str = json["parameters"]["position"];
+      Serial.print(position_str);
       Serial.print("ing valve ");
       Serial.print(valve);
       Serial.println(".");
 
-      // TODO send servo CAN command
+      uint16_t valve_id = pid_to_can_id(valve);
+      if (valve_id == 0xFFFF) {
+        Serial.printf("Error moving %s, could not find ID.\n", valve);
+        return;
+      }
+
+      uint8_t position;
+      if (position_str == "open") { position = 1; }
+      else if (position_str == "close") { position = 0; }
+      else {
+        Serial.printf("Could not parse position %s\n", position_str); 
+        return;
+      }
+
+      can.beginPacket(CAN_ID);
+      can.write(0x22);
+      can.write(valve_id);
+      can.write(position);
+      Serial.printf("Sending command: { %d, %d, %d }\n", 0x22, valve_id, position);
+      if (!can.endPacket()) {
+        Serial.println("Error sending valve command packet");
+      }
     }
     if (command == "SELFTEST") { 
       Serial.println("Running self-test.");
       // TODO execute self-test sequence
     }
   }
+}
+
+uint16_t pid_to_can_id(String pid_label) {
+  uint16_t id;
+
+  if (pid_label == "FV1-E") id = 0x61;
+  else if (pid_label == "FV2-E") id = 0x62;
+  else if (pid_label == "FV3-E") id = 0x63;
+  else if (pid_label == "FV4-E") id = 0x60;
+  else if (pid_label == "FV-S") id = 0x64;
+  else id = 0xFFFF;
+
+  return id;
 }
 
 void reconnect() {
