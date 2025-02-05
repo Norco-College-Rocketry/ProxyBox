@@ -16,13 +16,15 @@
 #define LOAD_CELL_SAMPLE_RATE 100u // Period between load cell data samples in milliseconds
 #define LOAD_CELL_DEFAULT_CALIBRATION_VALUE -43.42
 
+#define CAN_ID 0x400
+
 const uint8_t mac[] = { 0x0E, 0x6C, 0xEB, 0x5B, 0xF2, 0xAB };
 const IPAddress ip = { 10, 63, 185, 2 };
 const IPAddress broker = { 10, 63, 185, 1 };
 
 void on_debug_serial();
 void on_mqtt_receive(char* topic, byte* payload, unsigned int length);
-void on_canbus_receive(int packet_size);
+void on_can_receive(int packet_size);
 float read_float(Adafruit_MCP2515 *hcan);
 void reconnect();
 float* getLoadData();
@@ -56,35 +58,33 @@ void setup() {
   }
   Serial.println("MCP2515 found."); 
   
-  Ethernet.init(13);
-  Ethernet.begin((uint8_t*)mac, ip); // the MAC isn't const qualified in this function, but is only used to pass as a const reference to the driver
+  // Ethernet.init(13);
+  // Ethernet.begin((uint8_t*)mac, ip); // the MAC isn't const qualified in this function, but is only used to pass as a const reference to the driver
 
-  delay(1500); // TODO test if this is necessary
-  pubSubClient.setServer(broker, 1883);
-  pubSubClient.setCallback(on_mqtt_receive);
+  // delay(1500); // TODO test if this is necessary
+  // pubSubClient.setServer(broker, 1883);
+  // pubSubClient.setCallback(on_mqtt_receive);
 
-  can.onReceive(PIN_CAN_INTERRUPT, on_canbus_receive);
+  // unsigned long stabilizing_time = 5000; // tare preciscion can be improved by adding a few seconds of stabilizing time
+  // boolean tare = true;                 // set this to false if you don't want tare to be performed in the next step
 
-  unsigned long stabilizing_time = 5000; // tare preciscion can be improved by adding a few seconds of stabilizing time
-  boolean tare = true;                 // set this to false if you don't want tare to be performed in the next step
-
-  for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
-    load_cells[i].driver.begin();
-  }
-  uint8_t start_status = 0;
-  while (start_status < 4) {
-    for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
-      if (load_cells[i].driver.startMultiple(stabilizing_time, tare) != 0) { start_status++; }
-    }
-  }
-  for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
-    if (load_cells[i].driver.getTareTimeoutFlag()) {
-      Serial.printf("Load cell %d timeout: check wiring and pin designations.\n", i+1);   
-    }
-  }
-  for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
-    load_cells[i].driver.setCalFactor(load_cells[i].calibration_value);
-  }
+  // for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
+  //   load_cells[i].driver.begin();
+  // }
+  // uint8_t start_status = 0;
+  // while (start_status < 4) {
+  //   for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
+  //     if (load_cells[i].driver.startMultiple(stabilizing_time, tare) != 0) { start_status++; }
+  //   }
+  // }
+  // for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
+  //   if (load_cells[i].driver.getTareTimeoutFlag()) {
+  //     Serial.printf("Load cell %d timeout: check wiring and pin designations.\n", i+1);   
+  //   }
+  // }
+  // for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
+  //   load_cells[i].driver.setCalFactor(load_cells[i].calibration_value);
+  // }
 
   Serial.println("Startup is complete");
 }
@@ -94,16 +94,21 @@ void loop() {
     on_debug_serial();
   }
 
+  int can_packet = can.parsePacket();
+  if (can_packet) {
+    on_can_receive(can_packet);
+  }
+
   // Update MQTT client
-  if (!pubSubClient.connected()) { reconnect(); }
-  pubSubClient.loop();
+  // if (!pubSubClient.connected()) { reconnect(); }
+  // pubSubClient.loop();
 
   // Update and sample load cells
-  if (load_cells[0].driver.update() && millis() >= next_load_cell_sample_time) {
-    for (size_t i=1; i<NUM_LOAD_CELLS; i++) { load_cells[i].driver.update(); }
-    sample_load_cells();
-    next_load_cell_sample_time = millis()+LOAD_CELL_SAMPLE_RATE;
-  }
+  // if (load_cells[0].driver.update() && millis() >= next_load_cell_sample_time) {
+  //   next_load_cell_sample_time = millis()+LOAD_CELL_SAMPLE_RATE;
+  //   for (size_t i=1; i<NUM_LOAD_CELLS; i++) { load_cells[i].driver.update(); }
+  //   sample_load_cells();
+  // }
 }
 
 void sample_load_cells() {
@@ -130,13 +135,12 @@ void sample_load_cells() {
 
 void on_debug_serial() {
     uint8_t command = Serial.parseInt();
-    uint8_t target_controller = 1;
+    uint16_t target_controller = 0x30;
     switch (command) {
       case 0: { 
         Serial.println("Sending LED command");
-        can.beginPacket(0x444);
-        can.write(0x20);
-        can.write(0x01);
+        can.beginPacket(CAN_ID);
+        can.write(0x21);
         can.write(target_controller);
         can.write(2);
         if (!can.endPacket()) {
@@ -150,10 +154,9 @@ void on_debug_serial() {
        case 4:
        case 5: {
         Serial.println("Sending calibration command");
-        can.beginPacket(444);
-        can.write(0x20);
-        can.write(0x03);
-        can.write(0x01);
+        can.beginPacket(CAN_ID);
+        can.write(0x23);
+        can.write(target_controller);
         can.write(command);
         if (!can.endPacket()) {
           Serial.println("Error sending packet");
@@ -166,9 +169,8 @@ void on_debug_serial() {
        case 9: 
        case 10: { 
         Serial.println("Sending mode command");
-        can.beginPacket(444);
-        can.write(0x20);
-        can.write(0x04);
+        can.beginPacket(CAN_ID);
+        can.write(0x24);
         can.write(target_controller);
         can.write(command-6);
         if (!can.endPacket()) {
@@ -178,23 +180,66 @@ void on_debug_serial() {
     }
 }
 
-void on_canbus_receive(int packet_size) {
+void on_can_receive(int packet_size) {
+  long id = can.packetId();
   PACKET_TYPE packet_type = (PACKET_TYPE)can.read();
 
   switch (packet_type) {
     case (TELEMETRY_PACKET): {
-        uint8_t controller = can.read();
-        uint8_t transmitter = can.read();
-        TELEMETRY_TYPE telemetry_type = (TELEMETRY_TYPE)can.read();
+      float value = read_float(&can);
+      
+      JsonDocument json;
+      String topic, out;
 
-        switch (telemetry_type) {
-          case (VOLTAGE_TELEMETRY):
-          case (PRESSURE_TELEMETRY): {
-            Serial.printf("%u, %f\n", controller, read_float(&can));
-          } break;
-        }
+      json["value"] = value;
 
-       } break;
+      switch (id) {
+        // Oxidizer PT
+        case 0x30: {
+          topic = "telemetry/tank/oxidizer/pressure";
+          json["unit"] = "psi";
+        } break;
+
+        // Fuel PT
+        case 0x31: {
+          topic = "telemetry/tank/fuel/pressure";
+          json["unit"] = "psi";
+        } break;
+        
+        // Supply PT
+        case 0x32: {
+          topic = "telemetry/supply/pressure";
+          json["unit"] = "psi";
+        } break;
+        
+        // Combustion Chamber PT
+        case 0x33: {
+          topic = "telemetry/chamber/pressure";
+          json["unit"] = "psi";
+        } break;
+        
+        // Vent Temperature Sensor
+        case 0x70: {
+          topic = "telemetry/tank/vent/temperature";
+          json["unit"] = "C";
+        } break;
+        
+        // Chamber Temperature Sensor
+        case 0x71: {
+          topic = "telemetry/chamber/temperature";
+          json["unit"] = "C";
+        } break;
+
+        default: return;
+      }
+
+      serializeJson(json, out);
+      Serial.println(out);
+      pubSubClient.publish(topic.c_str(), out.c_str());
+
+    } break;
+
+    case (COMMAND_PACKET): break;
     }
 }
 
