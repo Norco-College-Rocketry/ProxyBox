@@ -259,12 +259,10 @@ void on_mqtt_receive(char* topic, byte* payload, unsigned int length) {
        // Close fill
        // Close main ox
        // Close fuel
-    }
-    if (command == "IGNITE") {
+    } else if (command == "IGNITE") {
        Serial.println("Ignition.");
        digitalWrite(PIN_RELAY_1, HIGH);
-    }
-    if (command == "VALVE") {
+    } else if (command == "VALVE") {
       String valve = json["parameters"]["valve"],
              position_str = json["parameters"]["position"];
       Serial.print(position_str);
@@ -288,14 +286,13 @@ void on_mqtt_receive(char* topic, byte* payload, unsigned int length) {
 
       can.beginPacket(CAN_ID);
       can.write(0x22);
-      can.write(valve_id);
+      can.write((uint8_t*)(&valve_id), 2);
       can.write(position);
       Serial.printf("Sending command: { %d, %d, %d }\n", 0x22, valve_id, position);
       if (!can.endPacket()) {
         Serial.println("Error sending valve command packet");
       }
-    }
-    if (command == "SELFTEST") { 
+    } else if (command == "SELFTEST") { 
       Serial.println("Running self-test.");
       // TODO execute self-test sequence
     }
