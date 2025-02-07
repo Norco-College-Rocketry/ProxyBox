@@ -240,8 +240,7 @@ void on_can_receive(int packet_size) {
 
     } break;
 
-    case (COMMAND_PACKET): break;
-    }
+  }
 }
 
 void on_mqtt_receive(char* topic, byte* payload, unsigned int length) {
