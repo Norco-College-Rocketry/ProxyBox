@@ -25,7 +25,7 @@ const IPAddress broker = { 10, 63, 185, 1 };
 void on_debug_serial();
 void on_mqtt_receive(char* topic, byte* payload, unsigned int length);
 void on_can_receive(int packet_size);
-float read_float(Adafruit_MCP2515 *hcan);
+float parse_float(Adafruit_MCP2515 *hcan);
 void reconnect();
 float* getLoadData();
 void on_error();
@@ -187,7 +187,7 @@ void on_can_receive(int packet_size) {
 
   switch (packet_type) {
     case (TELEMETRY_PACKET): {
-      float value = read_float(&can);
+      float value = parse_float(&can);
       
       JsonDocument json;
       String topic, out;
@@ -264,10 +264,6 @@ void on_mqtt_receive(char* topic, byte* payload, unsigned int length) {
     } else if (command == "VALVE") {
       String valve = json["parameters"]["valve"],
              position_str = json["parameters"]["position"];
-      Serial.print(position_str);
-      Serial.print("ing valve ");
-      Serial.print(valve);
-      Serial.println(".");
 
       uint16_t valve_id = pid_to_can_id(valve);
       if (valve_id == 0xFFFF) {
@@ -284,7 +280,7 @@ void on_mqtt_receive(char* topic, byte* payload, unsigned int length) {
       }
 
       can.beginPacket(CAN_ID);
-      can.write(0x22);
+      can.write(VALVE_COMMAND_PACKET);
       can.write((uint8_t*)(&valve_id), 2);
       can.write(position);
       Serial.printf("Sending command: { %d, %d, %d }\n", 0x22, valve_id, position);
@@ -323,7 +319,7 @@ void reconnect() {
   }
 }
 
-float read_float(Adafruit_MCP2515 *hcan) {
+float parse_float(Adafruit_MCP2515 *hcan) {
   float value = 0.0f;
   hcan->readBytes((uint8_t *)&value, sizeof(float));
   return value;
