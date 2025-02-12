@@ -31,16 +31,17 @@ float* getLoadData();
 void on_error();
 void sample_load_cells();
 uint16_t pid_to_can_id(String pid_label);
+bool send_valve_command(uint16_t id, ValvePosition position);
 
 Adafruit_MCP2515 can(PIN_CAN_CS);
 EthernetClient ethernetClient;
 PubSubClient pubSubClient(ethernetClient);
-// LoadCell load_cells[NUM_LOAD_CELLS] = {
-//   {"LC01", {5,  SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
-//   {"LC02", {6,  SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
-//   {"LC03", {9,  SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
-//   {"LC04", {10, SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
-// };
+LoadCell load_cells[NUM_LOAD_CELLS] = {
+  {"LC01", {5,  SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
+  {"LC02", {6,  SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
+  {"LC03", {9,  SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
+  {"LC04", {10, SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
+};
 long next_load_cell_sample_time = 0;
 
 void setup() {
@@ -69,23 +70,23 @@ void setup() {
   unsigned long stabilizing_time = 5000; // tare preciscion can be improved by adding a few seconds of stabilizing time
   boolean tare = true;                 // set this to false if you don't want tare to be performed in the next step
 
-  // for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
-  //   load_cells[i].driver.begin();
-  // }
-  // uint8_t start_status = 0;
-  // while (start_status < 4) {
-  //   for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
-  //     if (load_cells[i].driver.startMultiple(stabilizing_time, tare) != 0) { start_status++; }
-  //   }
-  // }
-  // for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
-  //   if (load_cells[i].driver.getTareTimeoutFlag()) {
-  //     Serial.printf("Load cell %d timeout: check wiring and pin designations.\n", i+1);   
-  //   }
-  // }
-  // for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
-  //   load_cells[i].driver.setCalFactor(load_cells[i].calibration_value);
-  // }
+  for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
+    load_cells[i].driver.begin();
+  }
+  uint8_t start_status = 0;
+  while (start_status < 4) {
+    for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
+      if (load_cells[i].driver.startMultiple(stabilizing_time, tare) != 0) { start_status++; }
+    }
+  }
+  for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
+    if (load_cells[i].driver.getTareTimeoutFlag()) {
+      Serial.printf("Load cell %d timeout: check wiring and pin designations.\n", i+1);   
+    }
+  }
+  for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
+    load_cells[i].driver.setCalFactor(load_cells[i].calibration_value);
+  }
 
   Serial.println("Startup is complete");
 }
@@ -104,35 +105,35 @@ void loop() {
   if (!pubSubClient.connected()) { reconnect(); }
   pubSubClient.loop();
 
-  // // Update and sample load cells
-  // if (load_cells[0].driver.update() && millis() >= next_load_cell_sample_time) {
-  //   next_load_cell_sample_time = millis()+LOAD_CELL_SAMPLE_RATE;
-  //   for (size_t i=1; i<NUM_LOAD_CELLS; i++) { load_cells[i].driver.update(); }
-  //   sample_load_cells();
-  // }
+  // Update and sample load cells
+  if (load_cells[0].driver.update() && millis() >= next_load_cell_sample_time) {
+    next_load_cell_sample_time = millis()+LOAD_CELL_SAMPLE_RATE;
+    for (size_t i=1; i<NUM_LOAD_CELLS; i++) { load_cells[i].driver.update(); }
+    sample_load_cells();
+  }
 }
 
-// void sample_load_cells() {
-//   JsonDocument json;
-//   String out;
+void sample_load_cells() {
+  JsonDocument json;
+  String out;
 
-//   Serial.print("{ ");
-//   for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
-//     char topic[24];
-//     float data = load_cells[i].driver.getData() / 1000; // Must convert from grams to kg
+  Serial.print("{ ");
+  for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
+    char topic[24];
+    float data = load_cells[i].driver.getData() / 1000; // Must convert from grams to kg
 
-//     sprintf(topic, "telemetry/tank/weight/%d", i+1);
-//     json["label"] = load_cells[i].pid_label;
-//     json["value"] = data; 
-//     json["units"] = "kg";
-//     serializeJson(json, out);
-//     pubSubClient.publish(topic, out.c_str());
+    sprintf(topic, "telemetry/tank/weight/%d", i+1);
+    json["label"] = load_cells[i].pid_label;
+    json["value"] = data; 
+    json["unit"] = "kg";
+    serializeJson(json, out);
+    pubSubClient.publish(topic, out.c_str());
 
-//     Serial.print(data);
-//     if (i != 3) Serial.print(", ");
-//   }
-//   Serial.println(" }");
-// }
+    Serial.print(data);
+    if (i != 3) Serial.print(", ");
+  }
+  Serial.println(" }");
+}
 
 void on_debug_serial() {
     uint8_t command = Serial.parseInt();
@@ -271,20 +272,15 @@ void on_mqtt_receive(char* topic, byte* payload, unsigned int length) {
         return;
       }
 
-      uint8_t position;
-      if (position_str == "open") { position = 1; }
-      else if (position_str == "close") { position = 0; }
+      ValvePosition position;
+      if (position_str == "open") { position = OPEN; }
+      else if (position_str == "close") { position = CLOSED; }
       else {
         Serial.printf("Could not parse position %s\n", position_str); 
         return;
       }
 
-      can.beginPacket(CAN_ID);
-      can.write(VALVE_COMMAND_PACKET);
-      can.write((uint8_t*)(&valve_id), 2);
-      can.write(position);
-      Serial.printf("Sending command: { %d, %d, %d }\n", 0x22, valve_id, position);
-      if (!can.endPacket()) {
+      if (!send_valve_command(valve_id, position)) {
         Serial.println("Error sending valve command packet");
       }
     } else if (command == "SELFTEST") { 
@@ -292,6 +288,14 @@ void on_mqtt_receive(char* topic, byte* payload, unsigned int length) {
       // TODO execute self-test sequence
     }
   }
+}
+
+bool send_valve_command(uint16_t id, ValvePosition position) {
+    can.beginPacket(CAN_ID);
+    can.write(VALVE_COMMAND_PACKET);
+    can.write((uint8_t*)(&id), 2);
+    can.write((uint8_t)position);
+    return can.endPacket();
 }
 
 uint16_t pid_to_can_id(String pid_label) {

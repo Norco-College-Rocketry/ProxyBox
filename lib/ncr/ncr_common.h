@@ -12,4 +12,14 @@ typedef enum {
     SENSOR_MODE_COMMAND_PACKET = 0x24,
 } PACKET_TYPE;
 
+typedef enum {
+    CLOSED = 0,
+    OPEN = 1
+} ValvePosition;
+
+typedef struct {
+    uint16_t id;
+    ValvePosition position;    
+} ValveCommand;
+
 #endif // NCR_COMMON_H
