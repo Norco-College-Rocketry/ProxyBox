@@ -30,7 +30,17 @@ void reconnect();
 float* getLoadData();
 void on_error();
 void sample_load_cells();
+
+/** 
+ ** @brief Returns the CAN ID associated with the given P&ID number
+ **
+ ** P&ID labels and their CAN ID's are listed here: https://github.com/Norco-College-Rocketry/Olivine/wiki/CAN-Protocol#ids
+ **
+ ** @param pid_label P&ID label
+ ** @return 11-bit CAN ID or 0xFFFF if no ID was found
+ **/
 uint16_t pid_to_can_id(String pid_label);
+
 bool send_valve_command(uint16_t id, ValvePosition position);
 
 Adafruit_MCP2515 can(PIN_CAN_CS);
