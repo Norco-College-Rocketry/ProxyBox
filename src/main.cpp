@@ -27,7 +27,6 @@ void on_mqtt_receive(char* topic, byte* payload, unsigned int length);
 void on_can_receive(int packet_size);
 float parse_float(Adafruit_MCP2515 *hcan);
 void reconnect();
-float* getLoadData();
 void on_error();
 void sample_load_cells();
 
@@ -116,9 +115,10 @@ void loop() {
   pubSubClient.loop();
 
   // Update and sample load cells
-  if (load_cells[0].driver.update() && millis() >= next_load_cell_sample_time) {
+  uint8_t data_ready = load_cells[0].driver.update(); 
+  for (size_t i=1; i<NUM_LOAD_CELLS; i++) { load_cells[i].driver.update(); }
+  if (data_ready && millis() >= next_load_cell_sample_time) {
     next_load_cell_sample_time = millis()+LOAD_CELL_SAMPLE_RATE;
-    for (size_t i=1; i<NUM_LOAD_CELLS; i++) { load_cells[i].driver.update(); }
     sample_load_cells();
   }
 }
