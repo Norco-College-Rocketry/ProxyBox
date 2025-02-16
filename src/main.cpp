@@ -41,6 +41,18 @@ void sample_load_cells();
  **/
 uint16_t pid_to_can_id(String pid_label);
 
+
+/**
+ ** @brief Publishes a telemetry message to MQTT
+ **
+ ** @param topic MQTT topic to publish to
+ ** @param value Telemetry value
+ ** @param unit Units (kg, psi, etc.) of the telemetry value
+ ** @param pid_label P&ID label
+ ** @return 1 if publish was successful or 0 if publish was unsuccessful
+ **/
+bool publish_telemetry(const char *topic, float value, const char *unit, const char* pid_label="");
+
 bool send_valve_command(uint16_t id, ValvePosition position);
 void enable_igniter();
 void disable_igniter();
@@ -129,23 +141,24 @@ void loop() {
 void sample_load_cells() {
   JsonDocument json;
   String out;
+  float sum; // Total weight; sum of the distributed load of each load cell
 
   Serial.print("{ ");
   for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
     char topic[24];
     float data = load_cells[i].driver.getData() / 1000; // Must convert from grams to kg
 
+    sum += data;
+
     sprintf(topic, "telemetry/tank/weight/%d", i+1);
-    json["label"] = load_cells[i].pid_label;
-    json["value"] = data; 
-    json["unit"] = "kg";
-    serializeJson(json, out);
-    pubSubClient.publish(topic, out.c_str());
+    publish_telemetry(topic, data, "kg", load_cells[i].pid_label.c_str());
 
     Serial.print(data);
     if (i != 3) Serial.print(", ");
   }
   Serial.println(" }");
+
+  publish_telemetry("telemetry/thrust", sum, "kg");
 }
 
 void on_debug_serial() {
@@ -272,7 +285,7 @@ void on_mqtt_receive(char* topic, byte* payload, unsigned int length) {
       send_valve_command(pid_to_can_id("FV1-E"), CLOSED); // Close main ox
       send_valve_command(pid_to_can_id("FV2-E"), CLOSED); // Close main fuel
     } else if (command == "IGNITE") {
-       Serial.println("Ignition.");
+      Serial.println("Ignition.");
       enable_igniter();
     } else if (command == "VALVE") {
       String valve = json["parameters"]["valve"],
@@ -342,6 +355,18 @@ float parse_float(Adafruit_MCP2515 *hcan) {
   float value = 0.0f;
   hcan->readBytes((uint8_t *)&value, sizeof(float));
   return value;
+}
+
+bool publish_telemetry(const char *topic, float value, const char *unit, const char* pid_label) {
+  JsonDocument json;
+  String out;
+
+  json["label"] = pid_label;
+  json["value"] = value; 
+  json["unit"] = unit;
+  serializeJson(json, out);
+
+  return pubSubClient.publish(topic, out.c_str());
 }
 
 void on_error() {
