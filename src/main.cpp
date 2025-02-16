@@ -11,6 +11,7 @@
 
 #define PIN_RELAY_1 11u
 #define PIN_RELAY_2 12u
+#define PIN_IGNITER PIN_RELAY_1
 
 #define NUM_LOAD_CELLS 4u
 #define LOAD_CELL_SAMPLE_RATE 100u // Period between load cell data samples in milliseconds
@@ -41,6 +42,8 @@ void sample_load_cells();
 uint16_t pid_to_can_id(String pid_label);
 
 bool send_valve_command(uint16_t id, ValvePosition position);
+void enable_igniter();
+void disable_igniter();
 
 Adafruit_MCP2515 can(PIN_CAN_CS);
 EthernetClient ethernetClient;
@@ -262,16 +265,15 @@ void on_mqtt_receive(char* topic, byte* payload, unsigned int length) {
     String command = json["command"];
     if (command == "ABORT") {
       Serial.println("Aborting.");
-       digitalWrite(PIN_RELAY_1, LOW);
-       // TODO abort sequence
-       // Open dump
-       // Open vent
-       // Close fill
-       // Close main ox
-       // Close fuel
+      disable_igniter();
+      send_valve_command(pid_to_can_id("FV4-E"), OPEN); // Open dump
+      send_valve_command(pid_to_can_id("FV3-E"), OPEN); // Open vent
+      send_valve_command(pid_to_can_id("FV-S"), CLOSED); // Close fill
+      send_valve_command(pid_to_can_id("FV1-E"), CLOSED); // Close main ox
+      send_valve_command(pid_to_can_id("FV2-E"), CLOSED); // Close main fuel
     } else if (command == "IGNITE") {
        Serial.println("Ignition.");
-       digitalWrite(PIN_RELAY_1, HIGH);
+      enable_igniter();
     } else if (command == "VALVE") {
       String valve = json["parameters"]["valve"],
              position_str = json["parameters"]["position"];
@@ -307,6 +309,9 @@ bool send_valve_command(uint16_t id, ValvePosition position) {
     can.write((uint8_t)position);
     return can.endPacket();
 }
+
+void enable_igniter() { digitalWrite(PIN_IGNITER, HIGH); }
+void disable_igniter() { digitalWrite(PIN_IGNITER, LOW); }
 
 uint16_t pid_to_can_id(String pid_label) {
   uint16_t id;
