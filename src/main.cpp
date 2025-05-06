@@ -13,6 +13,11 @@
 #define PIN_RELAY_2 12u
 #define PIN_IGNITER PIN_RELAY_1
 
+#define PIN_STATUS_LED D6
+#define PIN_POWER_LED D10
+#define PIN_WARN_LED D9
+#define PIN_ERROR_LED D4
+
 #define NUM_LOAD_CELLS 4u
 #define LOAD_CELL_SAMPLE_RATE 100u // Period between load cell data samples in milliseconds
 #define LOAD_CELL_DEFAULT_CALIBRATION_VALUE -43.42
@@ -61,10 +66,10 @@ Adafruit_MCP2515 can(PIN_CAN_CS);
 EthernetClient ethernetClient;
 PubSubClient pubSubClient(ethernetClient);
 LoadCell load_cells[NUM_LOAD_CELLS] = {
-  {"LC01", {5,  SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
-  {"LC02", {6,  SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
-  {"LC03", {9,  SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
-  {"LC04", {10, SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
+  {"LC01", {A0,  SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
+  {"LC02", {A1,  SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
+  {"LC03", {A2,  SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
+  {"LC04", {A3, SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
 };
 long next_load_cell_sample_time = 0;
 
@@ -76,11 +81,20 @@ void setup() {
   digitalWrite(PIN_RELAY_2, LOW);
   digitalWrite(LED_BUILTIN, LOW);
 
+  pinMode(PIN_STATUS_LED, OUTPUT);
+  pinMode(PIN_POWER_LED, OUTPUT);
+  pinMode(PIN_WARN_LED, OUTPUT);
+  pinMode(PIN_ERROR_LED, OUTPUT);
+  digitalWrite(PIN_STATUS_LED, HIGH);
+  digitalWrite(PIN_POWER_LED, HIGH);
+  digitalWrite(PIN_WARN_LED, HIGH);
+  digitalWrite(PIN_ERROR_LED, HIGH);
+
   Serial.begin(UART_BAUD);
 
-  if (!can.begin(CAN_BAUD)) {
+  while (!can.begin(CAN_BAUD)) {
     Serial.println("Error initializing MCP2515.");
-    on_error();
+    delay(50);
   }
   Serial.println("MCP2515 found."); 
   
@@ -143,7 +157,6 @@ void sample_load_cells() {
   String out;
   float sum; // Total weight; sum of the distributed load of each load cell
 
-  Serial.print("{ ");
   for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
     char topic[24];
     float data = load_cells[i].driver.getData() / 1000; // Must convert from grams to kg
@@ -153,10 +166,7 @@ void sample_load_cells() {
     sprintf(topic, "telemetry/tank/weight/%d", i+1);
     publish_telemetry(topic, data, "kg", load_cells[i].pid_label.c_str());
 
-    Serial.print(data);
-    if (i != 3) Serial.print(", ");
   }
-  Serial.println(" }");
 
   publish_telemetry("telemetry/thrust", sum, "kg");
 }
@@ -222,47 +232,67 @@ void on_can_receive(int packet_size) {
       json["value"] = value;
 
       switch (id) {
+        // Tank PT
+        case 0x29: {
+          topic = "telemetry/tank/pressure";
+          json["unit"] = "psi";
+          json["label"] = "PT-ET205";
+        } break;
+
         // Oxidizer PT
         case 0x30: {
           topic = "telemetry/tank/oxidizer/pressure";
           json["unit"] = "psi";
+          json["label"] = "PT1-T";
         } break;
 
         // Fuel PT
         case 0x31: {
           topic = "telemetry/tank/fuel/pressure";
           json["unit"] = "psi";
+          json["label"] = "PT2-T";
         } break;
         
         // Supply PT
         case 0x32: {
           topic = "telemetry/supply/pressure";
           json["unit"] = "psi";
+          json["label"] = "PT-F101";
         } break;
         
         // Combustion Chamber PT
         case 0x33: {
           topic = "telemetry/chamber/pressure";
           json["unit"] = "psi";
+          json["label"] = "PT-C201";
+        } break;
+
+        // Injector PT
+        case 0x34: {
+          topic = "telemetry/injector/pressure";
+          json["unit"] = "psi";
+          json["label"] = "PT-EI202";
         } break;
         
         // Vent Temperature Sensor
         case 0x70: {
           topic = "telemetry/tank/vent/temperature";
           json["unit"] = "C";
+          json["label"] = "TC-N204";
         } break;
         
         // Chamber Temperature Sensor
         case 0x71: {
           topic = "telemetry/chamber/temperature";
           json["unit"] = "C";
+          json["label"] = "TC-C203";
         } break;
 
         default: return;
       }
 
       serializeJson(json, out);
-      Serial.println(out);
+      // Serial.println(out);
       pubSubClient.publish(topic.c_str(), out.c_str());
 
     } break;
@@ -279,11 +309,11 @@ void on_mqtt_receive(char* topic, byte* payload, unsigned int length) {
     if (command == "ABORT") {
       Serial.println("Aborting.");
       disable_igniter();
-      send_valve_command(pid_to_can_id("FV4-E"), OPEN); // Open dump
-      send_valve_command(pid_to_can_id("FV3-E"), OPEN); // Open vent
-      send_valve_command(pid_to_can_id("FV-S"), CLOSED); // Close fill
-      send_valve_command(pid_to_can_id("FV1-E"), CLOSED); // Close main ox
-      send_valve_command(pid_to_can_id("FV2-E"), CLOSED); // Close main fuel
+      send_valve_command(pid_to_can_id("SV-N204"), OPEN); // Open solenoid dump
+      send_valve_command(pid_to_can_id("SV-N202"), OPEN); // Open vent
+      send_valve_command(pid_to_can_id("SV-N101"), CLOSED); // Close fill
+      send_valve_command(pid_to_can_id("SV-N201"), CLOSED); // Close main ox
+      send_valve_command(pid_to_can_id("SV-E203"), CLOSED); // Close main fuel
     } else if (command == "IGNITE") {
       Serial.println("Ignition.");
       enable_igniter();
@@ -308,9 +338,17 @@ void on_mqtt_receive(char* topic, byte* payload, unsigned int length) {
       if (!send_valve_command(valve_id, position)) {
         Serial.println("Error sending valve command packet");
       }
-    } else if (command == "SELFTEST") { 
-      Serial.println("Running self-test.");
-      // TODO execute self-test sequence
+    } else if (command == "LAUNCH") { 
+      Serial.println("Executing launch sequence.");
+      send_valve_command(pid_to_can_id("SV-N102"), CLOSED); // Close remote dump valve
+      send_valve_command(pid_to_can_id("SV-N204"), CLOSED); // Close solenoid dump valve
+      send_valve_command(pid_to_can_id("SV-N202"), CLOSED); // Close vent valve
+      send_valve_command(pid_to_can_id("SV-N101"), CLOSED); // Close supply valve
+      enable_igniter();
+      send_valve_command(pid_to_can_id("SV-E203"), OPEN); // Open main fuel valve
+      send_valve_command(pid_to_can_id("SV-N201"), OPEN); // Open main ox valve
+      delay(20);
+      disable_igniter();
     }
   }
 }
@@ -329,11 +367,11 @@ void disable_igniter() { digitalWrite(PIN_IGNITER, LOW); }
 uint16_t pid_to_can_id(String pid_label) {
   uint16_t id;
 
-  if (pid_label == "FV1-E") id = 0x61;
-  else if (pid_label == "FV2-E") id = 0x62;
-  else if (pid_label == "FV3-E") id = 0x63;
-  else if (pid_label == "FV4-E") id = 0x60;
-  else if (pid_label == "FV-S") id = 0x64;
+  if (pid_label == "SV-N102") id = 0x60;
+  else if (pid_label == "SV-N201") id = 0x61;
+  else if (pid_label == "SV-E203") id = 0x62;
+  else if (pid_label == "SV-N202") id = 0x63;
+  else if (pid_label == "SV-N101") id = 0x64;
   else id = 0xFFFF;
 
   return id;
