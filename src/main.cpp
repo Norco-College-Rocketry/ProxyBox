@@ -24,6 +24,8 @@
 
 #define CAN_ID 0x400
 
+#define LTC2990_ADDR 0x98
+
 const uint8_t mac[] = { 0x0E, 0x6C, 0xEB, 0x5B, 0xF2, 0xAB };
 const IPAddress ip = { 10, 63, 185, 2 };
 const IPAddress broker = { 10, 63, 185, 1 };
@@ -65,12 +67,12 @@ void disable_igniter();
 Adafruit_MCP2515 can(PIN_CAN_CS);
 EthernetClient ethernetClient;
 PubSubClient pubSubClient(ethernetClient);
-LoadCell load_cells[NUM_LOAD_CELLS] = {
-  {"LC01", {A0,  SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
-  {"LC02", {A1,  SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
-  {"LC03", {A2,  SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
-  {"LC04", {A3, SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
-};
+// LoadCell load_cells[NUM_LOAD_CELLS] = {
+//   {"LC01", {A0,  SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
+//   {"LC02", {A1,  SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
+//   {"LC03", {A2,  SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
+//   {"LC04", {A3, SCL}, LOAD_CELL_DEFAULT_CALIBRATION_VALUE},
+// };
 long next_load_cell_sample_time = 0;
 
 void setup() {
@@ -97,6 +99,8 @@ void setup() {
     delay(50);
   }
   Serial.println("MCP2515 found."); 
+
+  Wire.begin();
   
   Ethernet.init(13);
   Ethernet.begin((uint8_t*)mac, ip); // the MAC isn't const qualified in this function, but is only used to pass as a const reference to the driver
@@ -108,67 +112,92 @@ void setup() {
   unsigned long stabilizing_time = 5000; // tare preciscion can be improved by adding a few seconds of stabilizing time
   boolean tare = true;                 // set this to false if you don't want tare to be performed in the next step
 
-  for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
-    load_cells[i].driver.begin();
-  }
-  uint8_t start_status = 0;
-  while (start_status < 4) {
-    for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
-      if (load_cells[i].driver.startMultiple(stabilizing_time, tare) != 0) { start_status++; }
-    }
-  }
-  for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
-    if (load_cells[i].driver.getTareTimeoutFlag()) {
-      Serial.printf("Load cell %d timeout: check wiring and pin designations.\n", i+1);   
-    }
-  }
-  for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
-    load_cells[i].driver.setCalFactor(load_cells[i].calibration_value);
-  }
+  // for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
+  //   load_cells[i].driver.begin();
+  // }
+  // uint8_t start_status = 0;
+  // while (start_status < 4) {
+  //   for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
+  //     if (load_cells[i].driver.startMultiple(stabilizing_time, tare) != 0) { start_status++; }
+  //   }
+  // }
+  // for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
+  //   if (load_cells[i].driver.getTareTimeoutFlag()) {
+  //     Serial.printf("Load cell %d timeout: check wiring and pin designations.\n", i+1);   
+  //   }
+  // }
+  // for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
+  //   load_cells[i].driver.setCalFactor(load_cells[i].calibration_value);
+  // }
 
   Serial.println("Startup is complete");
 }
 
 void loop() {
-  if (Serial.available()) {
-    on_debug_serial();
-  }
 
-  int can_packet = can.parsePacket();
-  if (can_packet) {
-    on_can_receive(can_packet);
-  }
+  uint8_t i2c_data[32];
+  Wire.beginTransmission(LTC2990_ADDR);
+  Wire.write(0x00);
+  if (!Wire.endTransmission() != 0) { 
+    Serial.println("Error sending register read address."); 
+  } 
 
-  // Update MQTT client
-  if (!pubSubClient.connected()) { reconnect(); }
-  pubSubClient.loop();
+  int8_t ret = Wire.requestFrom(LTC2990_ADDR, 1, true);
+  delay(100);
 
-  // Update and sample load cells
-  uint8_t data_ready = load_cells[0].driver.update(); 
-  for (size_t i=1; i<NUM_LOAD_CELLS; i++) { load_cells[i].driver.update(); }
-  if (data_ready && millis() >= next_load_cell_sample_time) {
-    next_load_cell_sample_time = millis()+LOAD_CELL_SAMPLE_RATE;
-    sample_load_cells();
+  if (ret == 0) {
+    Serial.println("Error requesting data.");
+  } else {
+    uint8_t i = 0;
+    while (Wire.available()) {
+      i2c_data[i++] = Wire.read();
+      Serial.printf("Read: %d\n", i2c_data[i]);
+    }
+
+    Serial.print("Data: ");
+    Serial.printf("%d\n", (uint16_t*)i2c_data);
   }
+  delay(100);
+
+  // if (Serial.available()) {
+  //   on_debug_serial();
+  // }
+
+  // int can_packet = can.parsePacket();
+  // if (can_packet) {
+  //   on_can_receive(can_packet);
+  // }
+
+  // // Update MQTT client
+  // if (!pubSubClient.connected()) { reconnect(); }
+  // pubSubClient.loop();
+
+  // // Update and sample load cells
+  // uint8_t data_ready = load_cells[0].driver.update(); 
+  // for (size_t i=1; i<NUM_LOAD_CELLS; i++) { load_cells[i].driver.update(); }
+  // if (data_ready && millis() >= next_load_cell_sample_time) {
+  //   next_load_cell_sample_time = millis()+LOAD_CELL_SAMPLE_RATE;
+  //   sample_load_cells();
+  // }
 }
 
 void sample_load_cells() {
-  JsonDocument json;
-  String out;
-  float sum; // Total weight; sum of the distributed load of each load cell
+  // JsonDocument json;
+  // String out;
+  // float sum; // Total weight; sum of the distributed load of each load cell
 
-  for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
-    char topic[24];
-    float data = load_cells[i].driver.getData() / 1000; // Must convert from grams to kg
+  // for (size_t i=0; i<NUM_LOAD_CELLS; i++) {
+  //   char topic[24];
+  //   float data = load_cells[i].driver.getData() / 1000; // Must convert from grams to kg
 
-    sum += data;
+  //   sum += data;
 
-    sprintf(topic, "telemetry/tank/weight/%d", i+1);
-    publish_telemetry(topic, data, "kg", load_cells[i].pid_label.c_str());
+  //   sprintf(topic, "telemetry/tank/weight/%d", i+1);
+  //   publish_telemetry(topic, data, "kg", load_cells[i].pid_label.c_str());
 
-  }
+  // }
 
-  publish_telemetry("telemetry/thrust", sum, "kg");
+  // publish_telemetry("telemetry/thrust", sum, "kg");
 }
 
 void on_debug_serial() {
